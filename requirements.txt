@@ -2,7 +2,5 @@ dash
 dash-bootstrap-components
 pandas
 openpyxl
-plotly
-Flask
 gunicorn
-Werkzeug
+plotly
