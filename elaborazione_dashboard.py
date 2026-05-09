@@ -7,17 +7,26 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # =========================================================
-# CONFIGURAZIONE FILE (Logica per Render)
+# CONFIGURAZIONE FILE (Compatibile Render/Linux)
 # =========================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def find_file(keyword):
-    # Cerca i file villa_cortese_... come presenti su GitHub
-    patterns = [f"villa_cortese_{keyword}.xlsx", f"*{keyword}*.xlsx", f"*{keyword}*.csv"]
-    for p in patterns:
-        files = glob.glob(os.path.join(BASE_DIR, p))
-        if files: return files[0]
-    raise FileNotFoundError(f"Manca file: {keyword}")
+    patterns = [
+        f"villa_cortese_{keyword}.xlsx",
+        f"villa_cortese_{keyword}.xlsm",
+        f"villa_cortese_{keyword}.csv",
+        f"*{keyword}*.xlsx",
+        f"*{keyword}*.xlsm",
+        f"*{keyword}*.csv"
+    ]
+
+    for pattern in patterns:
+        files = glob.glob(os.path.join(BASE_DIR, pattern))
+        if files:
+            return files[0]
+
+    raise FileNotFoundError(f"File non trovato: {keyword}")
 
 FILE_CAMERA   = find_file("camera")
 FILE_SENATO   = find_file("senato")
@@ -25,116 +34,515 @@ FILE_EUROPEE  = find_file("europee")
 FILE_COMUNALI = find_file("comunali")
 
 # =========================================================
-# ELABORAZIONE DATI (Logica da elaborazione_dashboard_bis.py)
+# LETTURA FILE
 # =========================================================
 def read_file(path):
     try:
-        df = pd.read_csv(path) if path.endswith(".csv") else pd.read_excel(path)
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        if 'lista' in df.columns and 'lista/partito' not in df.columns:
-            df = df.rename(columns={'lista': 'lista/partito'})
-        return df
-    except: return pd.DataFrame()
+        if path.endswith(".csv"):
+            df = pd.read_csv(path)
+        else:
+            df = pd.read_excel(path)
 
+        df.columns = [str(c).strip().lower() for c in df.columns]
+
+        if "lista" in df.columns and "lista/partito" not in df.columns:
+            df = df.rename(columns={"lista": "lista/partito"})
+
+        return df
+
+    except Exception as e:
+        print(f"Errore lettura {path}: {e}")
+        return pd.DataFrame()
+
+# =========================================================
+# NORMALIZZAZIONE PARTITI
+# =========================================================
 def normalize_party(n):
-    n = str(n).lower()
-    if "pd" in n or "ulivo" in n: return "PD"
-    if "forza italia" in n or "pdl" in n: return "FI / PDL"
-    if "lega" in n: return "LEGA"
-    if "fdi" in n or "fratelli" in n: return "FDI"
-    if "5 stelle" in n or "m5s" in n: return "M5S"
+
+    n = str(n).lower().strip()
+
+    if not n:
+        return None
+
+    if "totale" in n:
+        return None
+
+    if "pd" in n or "ulivo" in n:
+        return "PD"
+
+    if "forza italia" in n or "pdl" in n:
+        return "FI / PDL"
+
+    if "lega" in n:
+        return "LEGA"
+
+    if "fdi" in n or "fratelli" in n:
+        return "FDI"
+
+    if "5 stelle" in n or "m5s" in n:
+        return "M5S"
+
     return n.upper()
 
-def build_trend(df):
-    if df.empty: return {}
-    res = {}
+# =========================================================
+# COSTRUZIONE TREND
+# =========================================================
+def build_trend(df, min_rilevazioni=2):
+
+    if df.empty:
+        return {}
+
+    risultati = {}
+
     for _, r in df.iterrows():
+
         try:
-            p = normalize_party(r["lista/partito"])
-            anno, val = int(r["anno"]), float(str(r["percentuale"]).replace(",", ".").replace("%", ""))
-            res.setdefault(p, {})
-            res[p][anno] = res[p].get(anno, 0) + val
-        except: continue
-    return {p: v for p, v in res.items() if len(v) >= 1} # Logica originale
+            partito = normalize_party(r["lista/partito"])
 
-# Caricamento dati per tutte le categorie
-T_CAM = build_trend(read_file(FILE_CAMERA))
-T_SEN = build_trend(read_file(FILE_SENATO))
-T_EUR = build_trend(read_file(FILE_EUROPEE))
-T_COM = build_trend(read_file(FILE_COMUNALI))
+            if not partito:
+                continue
 
-ALL_P = sorted(set(list(T_CAM.keys()) + list(T_SEN.keys()) + list(T_EUR.keys()) + list(T_COM.keys())))
+            anno = int(r["anno"])
+
+            val = (
+                str(r["percentuale"])
+                .replace("%", "")
+                .replace(",", ".")
+                .strip()
+            )
+
+            val = float(val)
+
+            risultati.setdefault(partito, {})
+            risultati[partito][anno] = (
+                risultati[partito].get(anno, 0) + val
+            )
+
+        except:
+            continue
+
+    # FILTRO SOLO PER CAMERA/SENATO/EUROPEE
+    return {
+        p: v
+        for p, v in risultati.items()
+        if len(v) >= min_rilevazioni
+    }
+
+# =========================================================
+# CARICAMENTO DATI
+# =========================================================
+DF_CAMERA   = read_file(FILE_CAMERA)
+DF_SENATO   = read_file(FILE_SENATO)
+DF_EUROPEE  = read_file(FILE_EUROPEE)
+DF_COMUNALI = read_file(FILE_COMUNALI)
+
+# Trend nazionali con filtro storico
+T_CAM = build_trend(DF_CAMERA, min_rilevazioni=2)
+T_SEN = build_trend(DF_SENATO, min_rilevazioni=2)
+T_EUR = build_trend(DF_EUROPEE, min_rilevazioni=2)
+
+# Comunali SENZA filtro
+T_COM = build_trend(DF_COMUNALI, min_rilevazioni=1)
+
+ALL_P = sorted(
+    set(
+        list(T_CAM.keys()) +
+        list(T_SEN.keys()) +
+        list(T_EUR.keys())
+    )
+)
+
+ALL_COM = sorted(T_COM.keys())
 
 # =========================================================
 # DASH APP
 # =========================================================
-app = dash.Dash(__name__, 
-                external_stylesheets=[dbc.themes.FLATLY],
-                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
+app = dash.Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.FLATLY],
+    meta_tags=[
+        {
+            "name": "viewport",
+            "content": "width=device-width, initial-scale=1"
+        }
+    ]
+)
+
 server = app.server
 
+# =========================================================
+# TEMPLATE HTML
+# =========================================================
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>Osservatorio Villa Cortese</title>
+        {%favicon%}
+        {%css%}
+
+        <style>
+
+            body {
+                overflow-x: hidden;
+            }
+
+            .container-fluid {
+                padding-left: 15px;
+                padding-right: 15px;
+            }
+
+            /* BLOCCA INTERAZIONI GRAFICI */
+
+            .js-plotly-plot,
+            .plot-container,
+            .svg-container {
+                touch-action: none !important;
+            }
+
+            .modebar {
+                display: none !important;
+            }
+
+        </style>
+
+    </head>
+
+    <body>
+        {%app_entry%}
+
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+
+    </body>
+</html>
+'''
+
+# =========================================================
+# LAYOUT
+# =========================================================
 app.layout = dbc.Container([
-    html.H1("📊 Osservatorio Villa Cortese", className="text-center my-4 text-primary fw-bold"),
+
+    html.H1(
+        "📊 Osservatorio Villa Cortese",
+        className="text-center my-4 text-primary fw-bold"
+    ),
 
     dbc.Tabs([
-        # 1. SCHEDA COMUNALI (Logica identica a trend storico)
-        dbc.Tab(label="🏛️ Comunali", children=[
-            html.Div([
-                html.Label("Seleziona Partito (Comunali):", className="mt-3 fw-bold"),
-                dcc.Dropdown(id="sel-p-com", options=[{"label": p, "value": p} for p in sorted(T_COM.keys())], 
-                             value=sorted(T_COM.keys())[0] if T_COM else None, className="mb-4"),
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id="t-com", config={'staticPlot': True}), width=12, className="mb-4"),
-                ])
-            ], className="p-3")
-        ]),
 
-        # 2. SCHEDA TREND NAZIONALI
-        dbc.Tab(label="📈 Trend Nazionali/Europee", children=[
-            html.Div([
-                html.Label("Seleziona Partito:", className="mt-3 fw-bold"),
-                dcc.Dropdown(id="sel-p", options=[{"label": p, "value": p} for p in ALL_P], 
-                             value=ALL_P[0] if ALL_P else None, className="mb-4"),
-                
-                dbc.Row([
-                    dbc.Col(dcc.Graph(id="t-cam", config={'staticPlot': True}), width=12, lg=4, className="mb-4"),
-                    dbc.Col(dcc.Graph(id="t-sen", config={'staticPlot': True}), width=12, lg=4, className="mb-4"),
-                    dbc.Col(dcc.Graph(id="t-eur", config={'staticPlot': True}), width=12, lg=4, className="mb-4"),
-                ])
-            ], className="mt-2")
-        ])
+        # =================================================
+        # TAB COMUNALI (PRIMA SCHEDA)
+        # =================================================
+        dbc.Tab(
+            label="🏛️ Comunali",
+            children=[
+
+                html.Div([
+
+                    html.Label(
+                        "Seleziona Partito:",
+                        className="mt-3 fw-bold"
+                    ),
+
+                    dcc.Dropdown(
+                        id="sel-p-com",
+                        options=[
+                            {"label": p, "value": p}
+                            for p in ALL_COM
+                        ],
+                        value=ALL_COM[0] if ALL_COM else None,
+                        clearable=False,
+                        className="mb-4"
+                    ),
+
+                    dbc.Row([
+                        dbc.Col(
+                            dcc.Graph(
+                                id="t-com",
+                                config={
+                                    "staticPlot": True,
+                                    "displayModeBar": False
+                                }
+                            ),
+                            width=12
+                        )
+                    ])
+
+                ], className="mt-2")
+
+            ]
+        ),
+
+        # =================================================
+        # TAB TREND STORICO
+        # =================================================
+        dbc.Tab(
+            label="📈 Trend Storico",
+            children=[
+
+                html.Div([
+
+                    html.Label(
+                        "Seleziona Partito:",
+                        className="mt-3 fw-bold"
+                    ),
+
+                    dcc.Dropdown(
+                        id="sel-p",
+                        options=[
+                            {"label": p, "value": p}
+                            for p in ALL_P
+                        ],
+                        value=ALL_P[0] if ALL_P else None,
+                        clearable=False,
+                        className="mb-4"
+                    ),
+
+                    dbc.Row([
+
+                        dbc.Col(
+                            dcc.Graph(
+                                id="t-cam",
+                                config={
+                                    "staticPlot": True,
+                                    "displayModeBar": False
+                                }
+                            ),
+                            width=12,
+                            lg=4,
+                            className="mb-4"
+                        ),
+
+                        dbc.Col(
+                            dcc.Graph(
+                                id="t-sen",
+                                config={
+                                    "staticPlot": True,
+                                    "displayModeBar": False
+                                }
+                            ),
+                            width=12,
+                            lg=4,
+                            className="mb-4"
+                        ),
+
+                        dbc.Col(
+                            dcc.Graph(
+                                id="t-eur",
+                                config={
+                                    "staticPlot": True,
+                                    "displayModeBar": False
+                                }
+                            ),
+                            width=12,
+                            lg=4,
+                            className="mb-4"
+                        ),
+
+                    ])
+
+                ], className="mt-2")
+
+            ]
+        )
+
     ])
+
 ], fluid=True)
 
-# Callback per la scheda Comunali
-@app.callback(Output("t-com", "figure"), Input("sel-p-com", "value"))
+# =========================================================
+# CALLBACK COMUNALI
+# =========================================================
+@app.callback(
+    Output("t-com", "figure"),
+    Input("sel-p-com", "value")
+)
 def update_comunali(p):
-    if not p or p not in T_COM: return go.Figure().update_layout(title="Dati non disponibili")
-    anni = sorted(T_COM[p].keys()); valori = [T_COM[p][a] for a in anni]
-    fig = go.Figure(go.Scatter(x=anni, y=valori, mode="lines+markers+text", 
-                             text=[f"{v}%" for v in valori], textposition="top center",
-                             line=dict(width=4, color="#e63946")))
-    fig.update_layout(title=dict(text=f"Trend Comunali - {p}", x=0.5), template="plotly_white", height=450)
+
+    if not p or p not in T_COM:
+
+        fig = go.Figure()
+
+        fig.update_layout(
+            title=dict(
+                text="Dati non disponibili",
+                x=0.5
+            ),
+            template="plotly_white",
+            height=450
+        )
+
+        return fig
+
+    anni = sorted(T_COM[p].keys())
+
+    valori = [
+        round(T_COM[p][a], 2)
+        for a in anni
+    ]
+
+    fig = go.Figure(
+        go.Scatter(
+            x=anni,
+            y=valori,
+            mode="lines+markers+text",
+            text=[f"{v}%" for v in valori],
+            textposition="top center",
+            line=dict(
+                width=4,
+                color="#e63946"
+            ),
+            marker=dict(size=10)
+        )
+    )
+
+    fig.update_layout(
+
+        title=dict(
+            text=f"Trend Comunali - {p}",
+            x=0.5
+        ),
+
+        template="plotly_white",
+
+        height=450,
+
+        hovermode=False,
+
+        dragmode=False,
+
+        margin=dict(
+            l=10,
+            r=10,
+            t=50,
+            b=10
+        ),
+
+        xaxis=dict(
+            tickvals=anni,
+            fixedrange=True,
+            showgrid=False
+        ),
+
+        yaxis=dict(
+            range=[0, max(valori) + 15] if valori else [0, 100],
+            fixedrange=True
+        )
+
+    )
+
     return fig
 
-# Callback per Camera, Senato, Europee
+# =========================================================
+# CALLBACK TREND STORICI
+# =========================================================
 @app.callback(
-    [Output("t-cam", "figure"), Output("t-sen", "figure"), Output("t-eur", "figure")],
+    [
+        Output("t-cam", "figure"),
+        Output("t-sen", "figure"),
+        Output("t-eur", "figure")
+    ],
     Input("sel-p", "value")
 )
 def update_trends(p):
+
     figs = []
-    for tit, d in [("Camera", T_CAM), ("Senato", T_SEN), ("Europee", T_EUR)]:
-        if not p or p not in d:
-            fig = go.Figure().update_layout(title=tit)
+
+    for titolo, dati in [
+        ("Camera", T_CAM),
+        ("Senato", T_SEN),
+        ("Europee", T_EUR)
+    ]:
+
+        if not p or p not in dati:
+
+            fig = go.Figure()
+
+            fig.update_layout(
+                title=dict(
+                    text=f"Trend {titolo} (Dati non disp.)",
+                    x=0.5
+                ),
+                template="plotly_white",
+                height=350
+            )
+
         else:
-            anni = sorted(d[p].keys()); valori = [d[p][a] for a in anni]
-            fig = go.Figure(go.Scatter(x=anni, y=valori, mode="lines+markers+text", 
-                                     text=[f"{v}%" for v in valori], textposition="top center",
-                                     line=dict(width=4, color="#1a5a96")))
-            fig.update_layout(title=dict(text=f"Trend {tit}", x=0.5), template="plotly_white", height=350)
+
+            anni = sorted(dati[p].keys())
+
+            valori = [
+                round(dati[p][a], 2)
+                for a in anni
+            ]
+
+            fig = go.Figure(
+                go.Scatter(
+                    x=anni,
+                    y=valori,
+                    mode="lines+markers+text",
+                    text=[f"{v}%" for v in valori],
+                    textposition="top center",
+                    line=dict(
+                        width=4,
+                        color="#1a5a96"
+                    ),
+                    marker=dict(size=10)
+                )
+            )
+
+            fig.update_layout(
+
+                title=dict(
+                    text=f"Trend {titolo}",
+                    x=0.5
+                ),
+
+                template="plotly_white",
+
+                height=350,
+
+                hovermode=False,
+
+                dragmode=False,
+
+                margin=dict(
+                    l=10,
+                    r=10,
+                    t=50,
+                    b=10
+                ),
+
+                xaxis=dict(
+                    tickvals=anni,
+                    fixedrange=True,
+                    showgrid=False
+                ),
+
+                yaxis=dict(
+                    range=[0, max(valori) + 15] if valori else [0, 100],
+                    fixedrange=True
+                )
+
+            )
+
         figs.append(fig)
+
     return figs[0], figs[1], figs[2]
 
+# =========================================================
+# AVVIO APP
+# =========================================================
 if __name__ == "__main__":
-    app.run(debug=False, host='0.0.0.0', port=8050)
+
+    port = int(os.environ.get("PORT", 8050))
+
+    app.run(
+        debug=False,
+        host="0.0.0.0",
+        port=port
+    )
