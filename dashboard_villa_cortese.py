@@ -7,22 +7,21 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # =========================================================
-# DIRECTORY FILE - AGGIORNATA PER RENDER
+# DIRECTORY FILE - CORRETTA PER RENDER
 # =========================================================
-# In locale userà la cartella corrente, su Render caricherà i file dal repository
+# Individua automaticamente la cartella dove si trova lo script su GitHub/Render
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # =========================================================
 # RICERCA AUTOMATICA FILE
 # =========================================================
 def find_file(keyword):
-    # Cerchiamo sia excel che csv per flessibilità
-    patterns = [f"*{keyword}*.xlsx", f"*{keyword}*.xlsm", f"*{keyword}*.xls", f"*{keyword}*.csv"]
+    # Cerchiamo prioritariamente file .xlsm, poi .xlsx e .xls
+    patterns = [f"*{keyword}*.xlsm", f"*{keyword}*.xlsx", f"*{keyword}*.xls"]
     for pattern in patterns:
         files = glob.glob(os.path.join(BASE_DIR, pattern))
         if files:
             return files[0]
-    # Se non trova il file, restituisce None invece di bloccare l'app
     return None
 
 FILE_CAMERA = find_file("camera")
@@ -31,24 +30,23 @@ FILE_EUROPEE = find_file("europee")
 FILE_COMUNALI = find_file("comunali")
 
 # =========================================================
-# LETTURA FILE
+# LETTURA FILE CON ENGINE OPENPYXL
 # =========================================================
 def read_file(path):
     if not path or not os.path.exists(path):
+        print(f"File non trovato o percorso errato: {path}")
         return pd.DataFrame()
     try:
-        if path.endswith('.csv'):
-            df = pd.read_csv(path)
-        else:
-            df = pd.read_excel(path)
+        # Usiamo openpyxl esplicitamente per leggere i file .xlsm
+        df = pd.read_excel(path, engine='openpyxl')
         df.columns = [str(c).strip().lower() for c in df.columns]
         return df
     except Exception as e:
-        print(f"Errore lettura {path}: {e}")
+        print(f"Errore nella lettura del file {path}: {e}")
         return pd.DataFrame()
 
 # =========================================================
-# NORMALIZZAZIONE E LOGICA (Invariata)
+# NORMALIZZAZIONE PARTITI (Invariata)
 # =========================================================
 def normalize_party(name):
     n = str(name).strip().lower()
@@ -63,6 +61,9 @@ def normalize_party(name):
     if any(x in n for x in ["rifondazione", "comunisti", "sinistra italiana", "avs"]): return "SINISTRA"
     return str(name).strip().upper()
 
+# =========================================================
+# LOGICA DI COSTRUZIONE DATI (Invariata)
+# =========================================================
 def build_trend(df):
     if df.empty: return {}
     result = {}
@@ -93,7 +94,7 @@ def build_comunali(df):
     return result
 
 # =========================================================
-# DATABASE E APP
+# DATABASE E INIZIALIZZAZIONE APP
 # =========================================================
 df_camera = read_file(FILE_CAMERA)
 df_senato = read_file(FILE_SENATO)
@@ -108,7 +109,7 @@ DATA_COM = build_comunali(df_comunali)
 ALL_PARTIES = sorted(list(set(list(TREND_CAMERA.keys()) + list(TREND_SENATO.keys()) + list(TREND_EUROPEE.keys()))))
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
-server = app.server # <--- FONDAMENTALE PER RENDER/GUNICORN
+server = app.server # <--- ESSENZIALE PER RENDER
 app.title = "Osservatorio Villa Cortese"
 
 app.layout = dbc.Container([
@@ -137,6 +138,9 @@ app.layout = dbc.Container([
     ])
 ], fluid=True)
 
+# =========================================================
+# CALLBACKS (Invariati)
+# =========================================================
 @app.callback(
     [Output("tab-com-perc", "children"), Output("tab-com-voti", "children"), Output("graf-com-perc", "figure"), Output("graf-com-voti", "figure")],
     Input("sel-partito", "value")
