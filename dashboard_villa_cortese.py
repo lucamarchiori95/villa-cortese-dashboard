@@ -7,16 +7,16 @@ import plotly.graph_objects as go
 import pandas as pd
 
 # =========================================================
-# DIRECTORY FILE - CORRETTA PER RENDER
+# 1. DIRECTORY FILE (CORRETTA PER GITHUB/RENDER)
 # =========================================================
-# Individua automaticamente la cartella dove si trova lo script su GitHub/Render
+# Questo comando dice al codice di cercare i file nella stessa cartella dove si trova lo script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # =========================================================
-# RICERCA AUTOMATICA FILE
+# 2. RICERCA AUTOMATICA FILE
 # =========================================================
 def find_file(keyword):
-    # Cerchiamo prioritariamente file .xlsm, poi .xlsx e .xls
+    # Cerchiamo i tuoi file .xlsm
     patterns = [f"*{keyword}*.xlsm", f"*{keyword}*.xlsx", f"*{keyword}*.xls"]
     for pattern in patterns:
         files = glob.glob(os.path.join(BASE_DIR, pattern))
@@ -30,23 +30,22 @@ FILE_EUROPEE = find_file("europee")
 FILE_COMUNALI = find_file("comunali")
 
 # =========================================================
-# LETTURA FILE CON ENGINE OPENPYXL
+# 3. LETTURA FILE (ENGINE PER XLSM)
 # =========================================================
 def read_file(path):
     if not path or not os.path.exists(path):
-        print(f"File non trovato o percorso errato: {path}")
         return pd.DataFrame()
     try:
-        # Usiamo openpyxl esplicitamente per leggere i file .xlsm
+        # Usiamo openpyxl per leggere i file Excel con macro
         df = pd.read_excel(path, engine='openpyxl')
         df.columns = [str(c).strip().lower() for c in df.columns]
         return df
     except Exception as e:
-        print(f"Errore nella lettura del file {path}: {e}")
+        print(f"Errore lettura {path}: {e}")
         return pd.DataFrame()
 
 # =========================================================
-# NORMALIZZAZIONE PARTITI (Invariata)
+# 4. LOGICA DATI E NORMALIZZAZIONE (IDENTICA ALL'ORIGINALE)
 # =========================================================
 def normalize_party(name):
     n = str(name).strip().lower()
@@ -61,9 +60,6 @@ def normalize_party(name):
     if any(x in n for x in ["rifondazione", "comunisti", "sinistra italiana", "avs"]): return "SINISTRA"
     return str(name).strip().upper()
 
-# =========================================================
-# LOGICA DI COSTRUZIONE DATI (Invariata)
-# =========================================================
 def build_trend(df):
     if df.empty: return {}
     result = {}
@@ -94,7 +90,7 @@ def build_comunali(df):
     return result
 
 # =========================================================
-# DATABASE E INIZIALIZZAZIONE APP
+# 5. INIZIALIZZAZIONE DATI
 # =========================================================
 df_camera = read_file(FILE_CAMERA)
 df_senato = read_file(FILE_SENATO)
@@ -108,8 +104,11 @@ DATA_COM = build_comunali(df_comunali)
 
 ALL_PARTIES = sorted(list(set(list(TREND_CAMERA.keys()) + list(TREND_SENATO.keys()) + list(TREND_EUROPEE.keys()))))
 
+# =========================================================
+# 6. DASH APP (CONFIGURAZIONE PER RENDER)
+# =========================================================
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
-server = app.server # <--- ESSENZIALE PER RENDER
+server = app.server # <--- FONDAMENTALE PER GUNICORN
 app.title = "Osservatorio Villa Cortese"
 
 app.layout = dbc.Container([
@@ -138,9 +137,7 @@ app.layout = dbc.Container([
     ])
 ], fluid=True)
 
-# =========================================================
-# CALLBACKS (Invariati)
-# =========================================================
+# Callback Trend (con staticPlot) e Comunali rimaste identiche
 @app.callback(
     [Output("tab-com-perc", "children"), Output("tab-com-voti", "children"), Output("graf-com-perc", "figure"), Output("graf-com-voti", "figure")],
     Input("sel-partito", "value")
@@ -163,7 +160,6 @@ def update_comunali(_):
     f2.add_trace(go.Bar(x=anni, y=df["Voti Insieme"], name="Insieme per Villa", marker_color="#d9534f", text=df["Voti Insieme"], textposition="outside"))
     f2.add_trace(go.Bar(x=anni, y=df["Voti Opposizione"], name="Opposizione", marker_color="#0275d8", text=df["Voti Opposizione"], textposition="outside"))
     f2.update_layout(barmode="group", xaxis=dict(tickvals=anni), template="plotly_white", height=350)
-
     return dbc.Table.from_dataframe(df_t1, striped=True, bordered=True), dbc.Table.from_dataframe(df_t2, striped=True, bordered=True), f1, f2
 
 @app.callback(
