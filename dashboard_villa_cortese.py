@@ -10,7 +10,9 @@ import pandas as pd
 # DIRECTORY FILE
 # =========================================================
 
-BASE_DIR = r"C:\Users\lucam\Desktop\Risultati_Villa_Cortese\Elaborazione da eligendo\XLMS"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if not any(fname.endswith('.xlsx') for fname in os.listdir(BASE_DIR)):
+    BASE_DIR = r"C:\Users\lucam\Desktop\Risultati_Villa_Cortese\Elaborazione da eligendo\XLMS"
 
 # =========================================================
 # RICERCA AUTOMATICA FILE
@@ -200,6 +202,7 @@ ALL_PARTIES = sorted(list(set(
 # =========================================================
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+server = app.server
 app.title = "Osservatorio Villa Cortese"
 
 app.layout = dbc.Container([
