@@ -92,10 +92,6 @@ def normalize_party(name):
 # COSTRUZIONE TREND (Con filtri 3% e 3 tornate)
 # =========================================================
 
-# =========================================================
-# COSTRUZIONE TREND (Modificata per evitare somme intra-elezione)
-# =========================================================
-
 def build_trend(df):
     if df.empty: return {}
     
